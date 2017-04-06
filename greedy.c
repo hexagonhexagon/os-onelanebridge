@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <unistd.h>
 #include "spin.h"
 
 typedef struct _vehicle_info
@@ -11,7 +12,7 @@ typedef struct _vehicle_info
     double inter_arrival_t;
 } vehicle_info;
 
-sem_t bridge, not_full, empty;
+sem_t bridge, not_full, empty, done;
 int bridge_cars = 0; //-3 <= bridge_cars <= 3: + means going N, - means going S.
 double time_elapsed = 0.0;
 
@@ -51,20 +52,13 @@ void * ArriveBridge(vehicle_info *v)
         else
             bridge_cars--;
     }
-
-//    printf("bridge_cars: %d\n", bridge_cars);
-//    int value;
-//    sem_getvalue(&not_full, &value);
-//    printf("not_full: %d\n", value);
-//    sem_getvalue(&empty, &value);
-//    printf("empty: %d\n", value);
-
     sem_post(&bridge);
 }
 
 void * CrossBridge(vehicle_info *v)
 {
-    printf("Time %.1f: Vehicle %2d (%c) crossing\n", v->inter_arrival_t, v->id, v->dir);
+    printf("Time %.1f: Vehicle %2d (%c) crossing\n", time_elapsed, v->id, v->dir);
+    printf("Debug: ");
     Spin(5);
 }
 
@@ -81,14 +75,17 @@ void * ExitBridge(vehicle_info *v)
     if (bridge_cars == 0)
         sem_post(&empty);    //If it wasn't empty but now is, return empty.
 
-//    printf("bridge_cars: %d\n", bridge_cars);
-//    sem_getvalue(&not_full, &value);
-//    printf("not_full: %d\n", value);
-//    sem_getvalue(&empty, &value);
-//    printf("empty: %d\n", value);
-
     sem_post(&bridge);
 
+}
+
+void * CountTimer()
+{
+    while (sem_trywait(&done) != 0)
+    {
+        Spin(1);
+        time_elapsed += 1.0;
+    }
 }
 
 int main()
@@ -109,24 +106,27 @@ int main()
         {12, 'N', 12.0}
     };
     pthread_t threads[13];
+    pthread_t timer;
     sem_init(&bridge, 0, 1);
     sem_init(&not_full, 0, 1);
     sem_init(&empty, 0, 1);
+    sem_init(&done, 0, 1);
+    sem_wait(&done);
 
     int i;
-    double time_to_wait = 0.0;
+    pthread_create(&timer, 0, CountTimer, 0);
     for (i = 0; i < 13; i++)
     {
-        time_to_wait = cars[i].inter_arrival_t - time_elapsed;
-        Spin(time_to_wait); //wait between vehicles
-        time_elapsed += time_to_wait;
         pthread_create(&threads[i], 0, VehicleAction, &cars[i]);
+        usleep(1000000); //wait between vehicles
     }
 
     for (i = 0; i < 13; i++)
     {
         pthread_join(threads[i], 0);
     }
+    sem_post(&done);
+    pthread_join(timer, 0);
 
     sem_destroy(&bridge);
     sem_destroy(&not_full);
