@@ -11,6 +11,11 @@ typedef struct _vehicle_info
     double inter_arrival_t;
 } vehicle_info;
 
+sem_t bridge, not_full, empty;
+int bridge_cars = 0; //-3 <= bridge_cars <= 3: + means going N, - means going S.
+double time_elapsed = 0.0;
+
+void * VehicleAction(void *);
 void * ArriveBridge(vehicle_info *);
 void * CrossBridge(vehicle_info *);
 void * ExitBridge(vehicle_info *);
@@ -18,14 +23,43 @@ void * ExitBridge(vehicle_info *);
 void * VehicleAction(void *arg)
 {
     vehicle_info *ti = (vehicle_info *) arg;
-//    ArriveBridge(ti);
+    ArriveBridge(ti);
     CrossBridge(ti);
-//    ExitBridge(ti);
+    ExitBridge(ti);
 }
 
 void * ArriveBridge(vehicle_info *v)
 {
-    ;
+    if ((bridge_cars > 0 && v->dir == 'N') || (bridge_cars < 0 && v->dir == 'S'))
+    {
+        sem_wait(&not_full); //Cars going in same direction as me? Then go when not full.
+        sem_wait(&bridge);   //Acquire bridge after not_full: otherwise deadlock.
+        if (v->dir == 'N')
+            bridge_cars++;   //Add or subtract bridge_cars depending on direction.
+        else
+            bridge_cars--;
+
+        if (bridge_cars != 3 || bridge_cars != -3)
+            sem_post(&not_full); //If bridge is now full, want to hold not_full until
+    }                            //it isn't. If it isn't full, return not_full.
+    else
+    {
+        sem_wait(&empty);    //Otherwise, they are going the opposite direction.
+        sem_wait(&bridge);
+        if (v->dir == 'N')   //Wait until the bridge is empty to go.
+            bridge_cars++;
+        else
+            bridge_cars--;
+    }
+
+//    printf("bridge_cars: %d\n", bridge_cars);
+//    int value;
+//    sem_getvalue(&not_full, &value);
+//    printf("not_full: %d\n", value);
+//    sem_getvalue(&empty, &value);
+//    printf("empty: %d\n", value);
+
+    sem_post(&bridge);
 }
 
 void * CrossBridge(vehicle_info *v)
@@ -36,7 +70,25 @@ void * CrossBridge(vehicle_info *v)
 
 void * ExitBridge(vehicle_info *v)
 {
-    ;
+    sem_wait(&bridge);
+    if (v->dir == 'N')
+        bridge_cars--; //Done crossing, so modify # cars on bridge.
+    else
+        bridge_cars++;
+
+    if (bridge_cars == 2 || bridge_cars == -2)
+        sem_post(&not_full); //If it was full, but now isn't, return not_full.
+    if (bridge_cars == 0)
+        sem_post(&empty);    //If it wasn't empty but now is, return empty.
+
+//    printf("bridge_cars: %d\n", bridge_cars);
+//    sem_getvalue(&not_full, &value);
+//    printf("not_full: %d\n", value);
+//    sem_getvalue(&empty, &value);
+//    printf("empty: %d\n", value);
+
+    sem_post(&bridge);
+
 }
 
 int main()
@@ -57,7 +109,9 @@ int main()
         {12, 'N', 12.0}
     };
     pthread_t threads[13];
-    double time_elapsed = 0.0;
+    sem_init(&bridge, 0, 1);
+    sem_init(&not_full, 0, 1);
+    sem_init(&empty, 0, 1);
 
     int i;
     double time_to_wait = 0.0;
@@ -74,5 +128,8 @@ int main()
         pthread_join(threads[i], 0);
     }
 
+    sem_destroy(&bridge);
+    sem_destroy(&not_full);
+    sem_destroy(&empty);
     return 0;
 }
