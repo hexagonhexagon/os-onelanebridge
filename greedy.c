@@ -76,10 +76,6 @@ void * ExitBridge(vehicle_info *v)
             sem_post(&lock_n);
     }
 
-//    printf("Time %.1f: Vehicle %2d (%c) exited\n", time_start - GetTime(), v->id, v->dir);
-//    int value;
-//    sem_getvalue(&not_full, &value);
-//    printf("not_full: %d\n", value);
     sem_post(&bridge);
 }
 
@@ -121,5 +117,7 @@ int main()
 
     sem_destroy(&bridge);
     sem_destroy(&not_full);
+    sem_destroy(&lock_n);
+    sem_destroy(&lock_s);
     return 0;
 }
