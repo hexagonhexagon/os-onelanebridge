@@ -43,7 +43,7 @@ void * ArriveBridge(vehicle_info *v)
     else
     {
         while (queue_peek(&waiting_cars) != v->id)
-            usleep(250000); //I am not first in line? I have to wait.
+            ; //I am not first in line? I have to wait.
 
         if (v->dir != bridge_dir)
             sem_wait(&lock_same); //If opposite direction, wait until everyone is off.
@@ -66,7 +66,7 @@ void * ArriveBridge(vehicle_info *v)
 
 void * CrossBridge(vehicle_info *v)
 {
-    printf("Time %.1f: Vehicle %2d (%c) crossing\n", GetTime() - time_start, v->id, v->dir);
+    printf("Time %4.1f: Vehicle %2d (%c) crossing\n", GetTime() - time_start, v->id, v->dir);
     Spin(5);
 }
 

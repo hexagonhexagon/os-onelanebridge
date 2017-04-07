@@ -57,7 +57,7 @@ void * ArriveBridge(vehicle_info *v)
 
 void * CrossBridge(vehicle_info *v)
 {
-    printf("Time %.1f: Vehicle %2d (%c) crossing\n", GetTime() - time_start, v->id, v->dir);
+    printf("Time %4.1f: Vehicle %2d (%c) crossing\n", GetTime() - time_start, v->id, v->dir);
     Spin(5);
 }
 
