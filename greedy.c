@@ -12,9 +12,9 @@ typedef struct _vehicle_info
     double inter_arrival_t;
 } vehicle_info;
 
-sem_t bridge, not_full, empty, done;
-int bridge_cars = 0; //-3 <= bridge_cars <= 3: + means going N, - means going S.
-double time_elapsed = 0.0;
+sem_t bridge, not_full, lock_n, lock_s;
+int bridge_cars = 0;  //number of cars on bridge
+double time_start;
 
 void * VehicleAction(void *);
 void * ArriveBridge(vehicle_info *);
@@ -31,61 +31,56 @@ void * VehicleAction(void *arg)
 
 void * ArriveBridge(vehicle_info *v)
 {
-    if ((bridge_cars > 0 && v->dir == 'N') || (bridge_cars < 0 && v->dir == 'S'))
+    if (v->dir == 'N')
     {
-        sem_wait(&not_full); //Cars going in same direction as me? Then go when not full.
-        sem_wait(&bridge);   //Acquire bridge after not_full: otherwise deadlock.
-        if (v->dir == 'N')
-            bridge_cars++;   //Add or subtract bridge_cars depending on direction.
-        else
-            bridge_cars--;
-
-        if (bridge_cars != 3 || bridge_cars != -3)
-            sem_post(&not_full); //If bridge is now full, want to hold not_full until
-    }                            //it isn't. If it isn't full, return not_full.
+        sem_wait(&lock_n);     //If ppl go in other direction, will be
+        if (bridge_cars == 0)  //stuck waiting for lock_n until others finish.
+            sem_wait(&lock_s); //If no one else is on bridge, prevent opposite dir from going.
+        sem_post(&lock_n);     //After go, return lock_n so other ppl can go.
+    }
     else
     {
-        sem_wait(&empty);    //Otherwise, they are going the opposite direction.
-        sem_wait(&bridge);
-        if (v->dir == 'N')   //Wait until the bridge is empty to go.
-            bridge_cars++;
-        else
-            bridge_cars--;
+        sem_wait(&lock_s);
+        if (bridge_cars == 0)
+            sem_wait(&lock_n);
+        sem_post(&lock_s);
     }
+
+    sem_wait(&not_full); //After get lock, wait until not full.
+    sem_wait(&bridge);   //Acquire bridge after not_full: otherwise deadlock.
+    bridge_cars++;
+    if (bridge_cars != 3)
+        sem_post(&not_full); //If bridge is now full, want to hold not_full until
+                             //it isn't. If it isn't full, return not_full.
     sem_post(&bridge);
 }
 
 void * CrossBridge(vehicle_info *v)
 {
-    printf("Time %.1f: Vehicle %2d (%c) crossing\n", time_elapsed, v->id, v->dir);
-    printf("Debug: ");
+    printf("Time %.1f: Vehicle %2d (%c) crossing\n", GetTime() - time_start, v->id, v->dir);
     Spin(5);
 }
 
 void * ExitBridge(vehicle_info *v)
 {
     sem_wait(&bridge);
-    if (v->dir == 'N')
-        bridge_cars--; //Done crossing, so modify # cars on bridge.
-    else
-        bridge_cars++;
+    bridge_cars--; //Done crossing, so modify # cars on bridge.
 
-    if (bridge_cars == 2 || bridge_cars == -2)
+    if (bridge_cars == 2)
         sem_post(&not_full); //If it was full, but now isn't, return not_full.
     if (bridge_cars == 0)
-        sem_post(&empty);    //If it wasn't empty but now is, return empty.
-
-    sem_post(&bridge);
-
-}
-
-void * CountTimer()
-{
-    while (sem_trywait(&done) != 0)
     {
-        Spin(1);
-        time_elapsed += 1.0;
+        if (v->dir == 'N')
+            sem_post(&lock_s); //If bridge is now empty, allow other direction to go.
+        else
+            sem_post(&lock_n);
     }
+
+//    printf("Time %.1f: Vehicle %2d (%c) exited\n", time_start - GetTime(), v->id, v->dir);
+//    int value;
+//    sem_getvalue(&not_full, &value);
+//    printf("not_full: %d\n", value);
+    sem_post(&bridge);
 }
 
 int main()
@@ -106,15 +101,13 @@ int main()
         {12, 'N', 12.0}
     };
     pthread_t threads[13];
-    pthread_t timer;
     sem_init(&bridge, 0, 1);
     sem_init(&not_full, 0, 1);
-    sem_init(&empty, 0, 1);
-    sem_init(&done, 0, 1);
-    sem_wait(&done);
+    sem_init(&lock_n, 0, 1);
+    sem_init(&lock_s, 0, 1);
 
     int i;
-    pthread_create(&timer, 0, CountTimer, 0);
+    time_start = GetTime();
     for (i = 0; i < 13; i++)
     {
         pthread_create(&threads[i], 0, VehicleAction, &cars[i]);
@@ -125,11 +118,8 @@ int main()
     {
         pthread_join(threads[i], 0);
     }
-    sem_post(&done);
-    pthread_join(timer, 0);
 
     sem_destroy(&bridge);
     sem_destroy(&not_full);
-    sem_destroy(&empty);
     return 0;
 }
