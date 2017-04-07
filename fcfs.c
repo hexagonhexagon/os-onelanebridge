@@ -4,6 +4,7 @@
 #include <semaphore.h>
 #include <unistd.h>
 #include "spin.h"
+#include "queue.h"
 
 typedef struct _vehicle_info
 {
@@ -12,9 +13,11 @@ typedef struct _vehicle_info
     double inter_arrival_t;
 } vehicle_info;
 
-sem_t bridge, not_full, lock_n, lock_s;
+sem_t bridge, not_full, lock_same, lock_queue;
 int bridge_cars = 0;  //number of cars on bridge
+char bridge_dir = ' ';
 double time_start;
+queue waiting_cars;
 
 void * VehicleAction(void *);
 void * ArriveBridge(vehicle_info *);
@@ -31,13 +34,34 @@ void * VehicleAction(void *arg)
 
 void * ArriveBridge(vehicle_info *v)
 {
+    sem_wait(&lock_queue); //We need a lock here b/c multiple threads will access this.
+    queue_enqueue(&waiting_cars, v->id); //Put me in the queue.
+    sem_post(&lock_queue);
+
+    if (bridge_cars == 0)
+        sem_wait(&lock_same); //No one on bridge? Get the lock.
+    else
+    {
+        while (queue_peek(&waiting_cars) != v->id)
+            usleep(250000); //I am not first in line? I have to wait.
+
+        if (v->dir != bridge_dir)
+            sem_wait(&lock_same); //If opposite direction, wait until everyone is off.
+    }
+
     sem_wait(&not_full); //After get lock, wait until not full.
     sem_wait(&bridge);   //Acquire bridge after not_full: otherwise deadlock.
     bridge_cars++;
     if (bridge_cars != 3)
         sem_post(&not_full); //If bridge is now full, want to hold not_full until
                              //it isn't. If it isn't full, return not_full.
+    if (bridge_dir == ' ')
+        bridge_dir = v->dir;
     sem_post(&bridge);
+
+    sem_wait(&lock_queue);
+    queue_dequeue(&waiting_cars); //Take me out of the queue: others can go.
+    sem_post(&lock_queue);
 }
 
 void * CrossBridge(vehicle_info *v)
@@ -52,14 +76,12 @@ void * ExitBridge(vehicle_info *v)
     bridge_cars--; //Done crossing, so modify # cars on bridge.
 
     if (bridge_cars == 2)
-        sem_post(&not_full); //If it was full, but now isn't, return not_full.
+        sem_post(&not_full);  //If it was full, but now isn't, return not_full.
     if (bridge_cars == 0)
     {
-        if (v->dir == 'N')
-            sem_post(&lock_s); //If bridge is now empty, allow other direction to go.
-        else
-            sem_post(&lock_n);
-    }
+        bridge_dir = ' ';
+        sem_post(&lock_same); //If I am the last car off, release lock_same:
+    }                         //the next car in line can wait for it.
 
     sem_post(&bridge);
 }
@@ -84,8 +106,8 @@ int main()
     pthread_t threads[13];
     sem_init(&bridge, 0, 1);
     sem_init(&not_full, 0, 1);
-    sem_init(&lock_n, 0, 1);
-    sem_init(&lock_s, 0, 1);
+    sem_init(&lock_same, 0, 1);
+    sem_init(&lock_queue, 0, 1);
 
     int i;
     time_start = GetTime();
@@ -102,7 +124,7 @@ int main()
 
     sem_destroy(&bridge);
     sem_destroy(&not_full);
-    sem_destroy(&lock_n);
-    sem_destroy(&lock_s);
+    sem_destroy(&lock_same);
+    sem_destroy(&lock_queue);
     return 0;
 }
