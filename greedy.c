@@ -102,12 +102,16 @@ int main()
     sem_init(&lock_n, 0, 1);
     sem_init(&lock_s, 0, 1);
 
-    int i;
+    int i, time_wait;
     time_start = GetTime();
     for (i = 0; i < 13; i++)
     {
+        if (i != 12) //Calculate amount of time to wait b/w threads
+            time_wait = cars[i+1].inter_arrival_t - cars[i].inter_arrival_t;
+        else         //Avoid out of bounds array access
+            time_wait = 0;
         pthread_create(&threads[i], 0, VehicleAction, &cars[i]);
-        usleep(1000000); //wait between vehicles
+        usleep(time_wait*1000000); //wait between vehicles
     }
 
     for (i = 0; i < 13; i++)
